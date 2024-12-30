@@ -1,0 +1,20 @@
+services:
+  db:
+    image: ankane/pgvector
+    volumes:
+      - dev-db-data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_DB=multi-vector
+      - POSTGRES_USER=mvuser
+      - POSTGRES_PASSWORD=mvpass
+    ports:
+      - "5438:5432"
+    networks:
+      - multi-vector-network
+
+networks:
+  multi-vector-network:
+    driver: bridge
+
+volumes:
+  dev-db-data:
