@@ -1,12 +1,12 @@
 import os
 import uuid
-
+from tqdm import tqdm
 from dotenv import load_dotenv
 from langchain.output_parsers.openai_functions import JsonKeyOutputFunctionsParser
 from langchain.retrievers.multi_vector import MultiVectorRetriever
 from langchain.schema.document import Document
 from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
@@ -21,6 +21,9 @@ load_dotenv()
 
 OPEN_API_KEY = os.getenv("OPENAI_API_KEY")
 MODEL = "gpt-4o-mini"
+
+DATA_FILES_PATH = "data/nps"
+
 id_key = "doc_id"
 
 embeddings = OpenAIEmbeddings()
@@ -39,11 +42,18 @@ retriever = MultiVectorRetriever(
     id_key=id_key,
 )
 
+def load_document(file_path):
+    if file_path.endswith(".pdf"):
+        return PyPDFLoader(file_path=file_path)
+    elif file_path.endswith(".docx"):
+        return Docx2txtLoader(file_path=file_path)
+    raise ValueError(f"Unsupported file type: {file_path}")
 
-def save_chuks(file_path):
+
+def save_chunks(file_path):
     file_name = os.path.basename(file_path)
 
-    loader = PyPDFLoader(file_path=file_path)
+    loader = load_document(file_path=file_path)
 
     # by default, we will split by pages with no text_splitter
     documents = loader.load_and_split(text_splitter=None)
@@ -95,14 +105,13 @@ def test_query_chunks(text):
 
 
 def summarize_chunks(file_path, doc_ids, file_names):
-    file_name = os.path.basename(file_path)
-
-    loader = PyPDFLoader(file_path=file_path)
+    loader = load_document(file_path=file_path)
 
     # by default, we will split by pages with no text_splitter
     documents = loader.load_and_split(text_splitter=None)
 
     prompt_text = """You are an assistant tasked with summarizing text. \
+    The output should be in pt-br.\
     Directly summarize the following text chunk: {element} """
     prompt = ChatPromptTemplate.from_template(prompt_text)
 
@@ -145,9 +154,7 @@ def summarize_chunks(file_path, doc_ids, file_names):
 
 
 def generate_hypothetical_questions(file_path, doc_ids, file_names):
-    file_name = os.path.basename(file_path)
-
-    loader = PyPDFLoader(file_path=file_path)
+    loader = load_document(file_path=file_path)
 
     # by default, we will split by pages with no text_splitter
     documents = loader.load_and_split(text_splitter=None)
@@ -174,7 +181,7 @@ def generate_hypothetical_questions(file_path, doc_ids, file_names):
             # Only asking for 5 hypothetical questions, but this could be adjusted
             | ChatPromptTemplate.from_template(
         """Generate a list of exactly 5 hypothetical questions that the below document could be used to answer:\n\n{doc}
-        seperate each question with a comma (,)
+        seperate each question with a comma (,) and in pt-br
         """
     )
             | ChatOpenAI(max_retries=0, model=MODEL).bind(
@@ -209,9 +216,21 @@ def generate_hypothetical_questions(file_path, doc_ids, file_names):
 
 
 def query_chunks(text):
-    template = """Answer the question based only on the following context:
+    template = """Answer the question based only on the following context.
+    
+    # Output:
+    Response: [detailed response]
+    Documents: list of files, at source information, with the information used to answer
+    
+    # Example:
+    Response: Sim, é possivel fazer tal ação
+    Documents: [doc1.docx, doc2.docx].
+    
+    # Context:
     {context}
-    Question: {question}
+    
+    # Question: 
+    {question}
     """
     prompt = ChatPromptTemplate.from_template(template)
 
@@ -231,14 +250,20 @@ def query_chunks(text):
     print(response)
 
 
-doc_ids, file_names = save_chuks("data/montreal.pdf")
-summarize_chunks("data/montreal.pdf", doc_ids, file_names)
-generate_hypothetical_questions("data/montreal.pdf", doc_ids, file_names)
+for file in tqdm(os.listdir("data"), desc="Processing files", unit="file"):
+    if file.endswith('.docx'):
+        print(f'Processing {file}...')
+        doc_ids, file_names = save_chunks(f"{DATA_FILES_PATH}/{file}")
+        summarize_chunks(f"{DATA_FILES_PATH}/{file}", doc_ids, file_names)
+        generate_hypothetical_questions(f"{DATA_FILES_PATH}/{file}", doc_ids, file_names)
 
-# test_query_chunks("What are some unique seasonal events in Montreal that a visitor should not miss?")
+# query = '''About what do you know?'''
 
-query_chunks("What dining options are available in Montreal for those interested in Middle Eastern cuisine?")
-print()
-query_chunks("Where can I find the best smoked meat sandwiches in Montreal?")
-print()
-query_chunks("Where can I find the best food in Montreal?")
+# test_query_chunks(query)
+# print()
+# print("Response")
+# query_chunks(query)
+# print()
+# query_chunks("Where can I find the best smoked meat sandwiches in Montreal?")
+# print()
+# query_chunks("Where can I find the best food in Montreal?")
